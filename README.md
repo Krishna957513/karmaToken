@@ -26,9 +26,20 @@ Fully on-chain transparency ensures fairness and immutability.
 ✅ Event Logging — All actions emit events for tracking and analytics.
 
 
+**📸 Proof of Work Image**
+
+
+
 
 **🧠 Smart Contract Details**
 
 Contract Name: KarmaToken
 Solidity Version: ^0.8.0
 License: MIT
+
+**❤ Built With Purpose**
+
+Ayush Kumar
+Exploring the blend of Blockchain, Morality, and Technology to inspire real-world change through decentralized kindness.
+
+
