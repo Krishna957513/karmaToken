@@ -25,6 +25,8 @@ Fully on-chain transparency ensures fairness and immutability.
 ✅ Revocation Support — Karma can be revoked by owner or platforms.
 ✅ Event Logging — All actions emit events for tracking and analytics.
 
+
+
 **🧠 Smart Contract Details**
 
 Contract Name: KarmaToken
