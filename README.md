@@ -1,5 +1,5 @@
 **🌟 KarmaToken.sol**
-A Soulbound Karma Token on Blockchain
+
 
 KarmaToken.sol is a decentralized, non-transferable (soulbound) token that represents reputation or karma points in a blockchain ecosystem.
 Only registered platforms and the contract owner can mint (award) or revoke karma, ensuring a trusted and fair reward system.
