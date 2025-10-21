@@ -26,7 +26,11 @@ Fully on-chain transparency ensures fairness and immutability.
 ✅ Event Logging — All actions emit events for tracking and analytics.
 
 
-**📸 Proof of Work Image**
+
+
+**📸 Proof of Work Image**-https://github.com/Krishna957513/karmaToken/blob/main/Screenshot%202025-10-21%20180222.png
+
+
 
 
 
