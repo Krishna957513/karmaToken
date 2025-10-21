@@ -1,0 +1,244 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.0;
+
+/**
+ * @title KarmaToken (soulbound)
+ * @dev Simple, non-transferable "Karma" token. Only registered platforms (and owner) can mint.
+ *      Transfers are disabled to keep Karma as reputation (soulbound).
+ *
+ *      - owner registers platforms and sets daily limits
+ *      - platforms can mint (award) karma to users, respecting daily limits
+ *      - owner and platforms can revoke karma
+ *
+ * NOTE: This is intentionally lightweight and does NOT implement full ERC20 transfer mechanics.
+ *       It emits ERC20-style events for indexing compatibility.
+ */
+contract KarmaToken {
+    // Basic token metadata
+    string public name;
+    string public symbol;
+    uint8 public decimals = 0; // integer karma points only
+
+    // Ownership
+    address public owner;
+
+    // Balances and total supply
+    mapping(address => uint256) private _balances;
+    uint256 private _totalSupply;
+
+    // Platform management
+    struct PlatformInfo {
+        bool registered;
+        uint256 dailyLimit; // 0 = unlimited
+    }
+    mapping(address => PlatformInfo) public platforms;
+    // platform => daysSinceEpoch => amount awarded that day
+    mapping(address => mapping(uint256 => uint256)) private platformDailyAwarded;
+
+    // Track known users (optional; useful for small-scale leaderboards)
+    address[] private _knownUsers;
+    mapping(address => bool) private _isKnownUser;
+
+    // ERC20-style events (transfer will be emitted on mint/burn)
+    event Transfer(address indexed from, address indexed to, uint256 value);
+    event Approval(address indexed owner, address indexed spender, uint256 value);
+
+    // Platform and owner events
+    event PlatformRegistered(address indexed platform, uint256 dailyLimit);
+    event PlatformUpdated(address indexed platform, uint256 dailyLimit);
+    event PlatformRemoved(address indexed platform);
+    event KarmaAwarded(address indexed platform, address indexed to, uint256 amount);
+    event KarmaBatchAwarded(address indexed platform, address[] recipients, uint256[] amounts);
+    event KarmaRevoked(address indexed platform, address indexed from, uint256 amount);
+    event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
+
+    // Modifiers
+    modifier onlyOwner() {
+        require(msg.sender == owner, "KarmaToken: caller is not the owner");
+        _;
+    }
+
+    modifier onlyPlatform() {
+        require(platforms[msg.sender].registered, "KarmaToken: caller not registered platform");
+        _;
+    }
+
+    constructor(string memory _name, string memory _symbol) {
+        name = _name;
+        symbol = _symbol;
+        owner = msg.sender;
+    }
+
+    // -------------------------
+    // Utility
+    // -------------------------
+    function _daysSinceEpoch() internal view returns (uint256) {
+        return block.timestamp / 1 days;
+    }
+
+    function _ensureKnownUser(address user) internal {
+        if (!_isKnownUser[user]) {
+            _isKnownUser[user] = true;
+            _knownUsers.push(user);
+        }
+    }
+
+    // -------------------------
+    // Owner / Platform management
+    // -------------------------
+
+    /// @notice Register a platform that can award karma
+    function registerPlatform(address _platform, uint256 _dailyLimit) external onlyOwner {
+        require(_platform != address(0), "invalid platform");
+        platforms[_platform].registered = true;
+        platforms[_platform].dailyLimit = _dailyLimit;
+        emit PlatformRegistered(_platform, _dailyLimit);
+    }
+
+    /// @notice Update platform's daily limit
+    function updatePlatform(address _platform, uint256 _dailyLimit) external onlyOwner {
+        require(platforms[_platform].registered, "platform not registered");
+        platforms[_platform].dailyLimit = _dailyLimit;
+        emit PlatformUpdated(_platform, _dailyLimit);
+    }
+
+    /// @notice Remove platform
+    function removePlatform(address _platform) external onlyOwner {
+        require(platforms[_platform].registered, "platform not registered");
+        delete platforms[_platform];
+        emit PlatformRemoved(_platform);
+    }
+
+    /// @notice Transfer ownership
+    function transferOwnership(address _newOwner) external onlyOwner {
+        require(_newOwner != address(0), "invalid new owner");
+        emit OwnershipTransferred(owner, _newOwner);
+        owner = _newOwner;
+    }
+
+    // -------------------------
+    // Minting / Revoking Karma
+    // -------------------------
+
+    /// @notice Award karma to a single user. Caller must be a registered platform.
+    function awardKarma(address _to, uint256 _amount) external onlyPlatform {
+        require(_to != address(0), "invalid recipient");
+        require(_amount > 0, "amount must be > 0");
+
+        PlatformInfo storage p = platforms[msg.sender];
+        uint256 day = _daysSinceEpoch();
+
+        if (p.dailyLimit != 0) {
+            uint256 used = platformDailyAwarded[msg.sender][day];
+            require(used + _amount <= p.dailyLimit, "daily limit exceeded");
+            platformDailyAwarded[msg.sender][day] = used + _amount;
+        }
+
+        _balances[_to] += _amount;
+        _totalSupply += _amount;
+        _ensureKnownUser(_to);
+
+        // Emit Transfer from zero address to comply with ERC-20 mint semantics
+        emit Transfer(address(0), _to, _amount);
+        emit KarmaAwarded(msg.sender, _to, _amount);
+    }
+
+    /// @notice Award karma to multiple users in a single call
+    function batchAwardKarma(address[] calldata _recipients, uint256[] calldata _amounts) external onlyPlatform {
+        require(_recipients.length == _amounts.length, "length mismatch");
+        require(_recipients.length > 0, "no recipients");
+
+        PlatformInfo storage p = platforms[msg.sender];
+        uint256 day = _daysSinceEpoch();
+        uint256 totalToAward = 0;
+
+        // first validate and sum
+        for (uint256 i = 0; i < _amounts.length; i++) {
+            require(_recipients[i] != address(0), "invalid recipient");
+            require(_amounts[i] > 0, "amount must be > 0");
+            totalToAward += _amounts[i];
+        }
+
+        if (p.dailyLimit != 0) {
+            uint256 used = platformDailyAwarded[msg.sender][day];
+            require(used + totalToAward <= p.dailyLimit, "daily limit exceeded");
+            platformDailyAwarded[msg.sender][day] = used + totalToAward;
+        }
+
+        // award
+        for (uint256 i = 0; i < _recipients.length; i++) {
+            _balances[_recipients[i]] += _amounts[i];
+            _ensureKnownUser(_recipients[i]);
+            emit Transfer(address(0), _recipients[i], _amounts[i]);
+        }
+
+        _totalSupply += totalToAward;
+        emit KarmaBatchAwarded(msg.sender, _recipients, _amounts);
+    }
+
+    /// @notice Revoke karma from a user (platforms and owner can call)
+    function revokeKarma(address _from, uint256 _amount) external {
+        require(_from != address(0), "invalid address");
+        // allow owner to revoke or registered platforms to revoke
+        require(msg.sender == owner || platforms[msg.sender].registered, "not permitted to revoke");
+        require(_balances[_from] >= _amount, "insufficient karma");
+
+        _balances[_from] -= _amount;
+        _totalSupply -= _amount;
+
+        // Use Transfer event to indicate burn (to zero address)
+        emit Transfer(_from, address(0), _amount);
+        emit KarmaRevoked(msg.sender, _from, _amount);
+    }
+
+    // -------------------------
+    // Non-transferable enforcement (soulbound)
+    // -------------------------
+
+    /// @notice Transfers are disabled for soulbound Karma
+    function transfer(address, uint256) public pure returns (bool) {
+        revert("KarmaToken: transfers are disabled (soulbound)");
+    }
+
+    /// @notice Approvals are disabled (no allowance or transfers)
+    function approve(address, uint256) public pure returns (bool) {
+        revert("KarmaToken: approvals are disabled");
+    }
+
+    /// @notice transferFrom disabled
+    function transferFrom(address, address, uint256) public pure returns (bool) {
+        revert("KarmaToken: transferFrom disabled");
+    }
+
+    /// @notice allowance always zero
+    function allowance(address, address) public pure returns (uint256) {
+        return 0;
+    }
+
+    // -------------------------
+    // Views
+    // -------------------------
+
+    function totalSupply() external view returns (uint256) {
+        return _totalSupply;
+    }
+
+    function balanceOf(address account) external view returns (uint256) {
+        return _balances[account];
+    }
+
+    /// @notice Get number of days this platform has used today
+    function platformAwardedToday(address _platform) external view returns (uint256) {
+        return platformDailyAwarded[_platform][_daysSinceEpoch()];
+    }
+
+    /// @notice Number of known users (small-scale)
+    function knownUserCount() external view returns (uint256) {
+        return _knownUsers.length;
+    }
+
+    /// @notice Return list of known users (careful: can be large)
+    function getKnownUsers() external view returns (address[] memory) {
+        return _knownUsers;
+    }
+}
